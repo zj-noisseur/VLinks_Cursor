@@ -92,6 +92,7 @@ const TimelineTab = () => {
       type: "audio",
       duration: "0:45",
       color: "bg-orange-50",
+      audioUrl: "https://aynwhrxnapmzbfpqyqec.supabase.co/storage/v1/object/public/audio_uploads/08d0ba07-4c0f-4f78-8c58-167a71a89b21/Michael%20Jackson%20-%20Heal%20The%20World%20(Official%20Video).mp3"
     },
     {
       id: "hardcoded-2",
@@ -154,6 +155,7 @@ const TimelineTab = () => {
           };
         }) || [];
 
+        console.log('Fetched artifacts from database:', transformedArtifacts);
         setArtifacts(transformedArtifacts);
       } catch (error) {
         console.error('Error fetching artifacts:', error);
@@ -201,6 +203,7 @@ const TimelineTab = () => {
         };
       }) || [];
 
+      console.log('Refreshed artifacts from database:', transformedArtifacts);
       setArtifacts(transformedArtifacts);
     } catch (error) {
       console.error('Error refreshing artifacts:', error);
@@ -209,6 +212,7 @@ const TimelineTab = () => {
 
   // Combine hardcoded and database artifacts, limit display
   const allArtifacts = [...hardcodedArtifacts, ...artifacts];
+  console.log('Total artifacts (hardcoded + database):', allArtifacts.length, 'Hardcoded:', hardcodedArtifacts.length, 'Database:', artifacts.length);
   const displayedArtifacts = allArtifacts.slice(0, displayCount);
   const hasMore = allArtifacts.length > displayCount;
 
@@ -218,7 +222,8 @@ const TimelineTab = () => {
 
   // Audio player functions
   const handlePlayAudio = async (item: any) => {
-    if (!item.filePath || item.type !== 'audio') return;
+    if (item.type !== 'audio') return;
+    if (!item.filePath && !item.audioUrl) return;
 
     // If clicking the same audio that's playing, pause it
     if (currentPlayingId === item.id && isPlaying) {
@@ -236,12 +241,20 @@ const TimelineTab = () => {
 
     // Load and play new audio
     try {
-      const { data } = supabase.storage
-        .from('audio_uploads')
-        .getPublicUrl(item.filePath);
+      let audioUrl: string;
+      
+      // Check if it's a direct URL or needs to be fetched from storage
+      if (item.audioUrl) {
+        audioUrl = item.audioUrl;
+      } else {
+        const { data } = supabase.storage
+          .from('audio_uploads')
+          .getPublicUrl(item.filePath);
+        audioUrl = data.publicUrl;
+      }
 
       if (audioRef.current) {
-        audioRef.current.src = data.publicUrl;
+        audioRef.current.src = audioUrl;
         audioRef.current.load();
         
         audioRef.current.onloadedmetadata = () => {

@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useRef } from "react";
 import {
   ArrowLeft,
   Map,
   MessageCircle,
+  Heart,
   Play,
   Pause,
   Share2,
@@ -16,7 +18,10 @@ import {
   Instagram,
   Facebook,
   Video,
+  Phone,
   Volume2,
+  Globe,
+  Music,
   Lock,
   Clock,
   Key,
@@ -24,6 +29,7 @@ import {
   Mail,
   CalendarHeart,
   Book,
+  Plus,
   CheckCircle,
   AlertCircle,
   Loader2,
@@ -32,27 +38,14 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import exifr from "exifr";
+// Ensure you have created src/lib/gemini.ts as per the previous instruction
 import { analyzeFile } from "../lib/gemini";
 
 type Tab = "timeline" | "echo" | "vault" | "letters";
 
-// Define a type for your artifacts to avoid 'any'
-interface Artifact {
-  id: string;
-  year: string;
-  title: string;
-  desc: string;
-  type: string;
-  duration?: string;
-  color: string;
-  filePath?: string;
-  textContent?: string;
-  metadata?: any;
-}
-
-// ------------------- 1. Sensory Timeline -------------------
+// ------------------- 1. Sensory Timeline (含 Essence Section) -------------------
 const TimelineTab = () => {
-  // --- Audio Upload Logic ---
+  //audio file input handling
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [audioUploadStatus, setAudioUploadStatus] = useState<
@@ -60,7 +53,7 @@ const TimelineTab = () => {
   >("idle");
   const [audioUploadMessage, setAudioUploadMessage] = useState("");
 
-  // --- Text Upload Logic ---
+  // Text file input handling
   const textFileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingText, setUploadingText] = useState(false);
   const [textUploadStatus, setTextUploadStatus] = useState<
@@ -68,7 +61,7 @@ const TimelineTab = () => {
   >("idle");
   const [textUploadMessage, setTextUploadMessage] = useState("");
 
-  // --- Image Upload Logic ---
+  // Image file input handling
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageUploadStatus, setImageUploadStatus] = useState<
@@ -76,7 +69,7 @@ const TimelineTab = () => {
   >("idle");
   const [imageUploadMessage, setImageUploadMessage] = useState("");
 
-  // --- Audio Player State ---
+  // Audio player state
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -84,13 +77,13 @@ const TimelineTab = () => {
   const [audioDuration, setAudioDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
 
-  // --- Artifacts State ---
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  // State for artifacts from database
+  const [artifacts, setArtifacts] = useState<any[]>([]);
   const [loadingArtifacts, setLoadingArtifacts] = useState(true);
   const [displayCount, setDisplayCount] = useState(3);
 
-  // Hardcoded artifacts
-  const hardcodedArtifacts: Artifact[] = [
+  // Hardcoded artifacts (always shown first)
+  const hardcodedArtifacts = [
     {
       id: "hardcoded-1",
       year: "1968",
@@ -106,6 +99,7 @@ const TimelineTab = () => {
       title: "Kopitiam Corner",
       desc: 'Every Sunday at 7 AM. "Kopi O Kosong, extra hot."',
       type: "location",
+      meta: "Jalan Besar",
       color: "bg-emerald-50",
     },
     {
@@ -114,99 +108,142 @@ const TimelineTab = () => {
       title: "The Old Guitar",
       desc: "He only knew three chords, but played with heart.",
       type: "music",
+      meta: 'Playing: "Stand By Me"',
       color: "bg-indigo-50",
     },
   ];
 
-  // Helper to process fetched data
-  const processArtifacts = (data: any[]) => {
-    const colors: Record<string, string> = {
-      audio: "bg-orange-50",
-      photo: "bg-indigo-50",
-      text: "bg-emerald-50",
+  // Fetch artifacts from database
+  useEffect(() => {
+    const fetchArtifacts = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setLoadingArtifacts(false);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('memoir_assets')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('content_date', { ascending: true }); // Oldest to newest
+
+        if (error) throw error;
+
+        // Transform database records to artifact format
+        const transformedArtifacts = data?.map((asset) => {
+          const year = new Date(asset.content_date).getFullYear().toString();
+          const colors = {
+            audio: 'bg-orange-50',
+            photo: 'bg-indigo-50',
+            text: 'bg-emerald-50'
+          };
+
+          return {
+            id: asset.id,
+            year,
+            title: asset.title || 'Untitled Memory',
+            desc: asset.description || 'A precious moment captured in time.',
+            type: asset.asset_type,
+            duration: asset.asset_type === 'audio' ? '0:00' : undefined,
+            color: colors[asset.asset_type as keyof typeof colors] || 'bg-stone-50',
+            filePath: asset.file_path,
+            textContent: asset.text_content,
+            metadata: asset.metadata
+          };
+        }) || [];
+
+        setArtifacts(transformedArtifacts);
+      } catch (error) {
+        console.error('Error fetching artifacts:', error);
+      } finally {
+        setLoadingArtifacts(false);
+      }
     };
 
-    return data.map((asset) => {
-      const year = new Date(asset.content_date).getFullYear().toString();
-      return {
-        id: asset.id,
-        year,
-        title: asset.title || "Untitled Memory",
-        desc: asset.description || "A precious moment captured in time.",
-        type: asset.asset_type,
-        duration: asset.asset_type === "audio" ? "0:00" : undefined,
-        color: colors[asset.asset_type] || "bg-stone-50",
-        filePath: asset.file_path,
-        textContent: asset.text_content,
-        metadata: asset.metadata,
-      };
-    });
-  };
-
-  const fetchArtifacts = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoadingArtifacts(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("memoir_assets")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("content_date", { ascending: true });
-
-      if (error) throw error;
-      setArtifacts(processArtifacts(data || []));
-    } catch (error) {
-      console.error("Error fetching artifacts:", error);
-    } finally {
-      setLoadingArtifacts(false);
-    }
-  };
-
-  // Initial Fetch
-  useEffect(() => {
     fetchArtifacts();
   }, []);
 
+  // Refresh artifacts after successful upload
   const refreshArtifacts = async () => {
-    await fetchArtifacts();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('memoir_assets')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('content_date', { ascending: true }); // Oldest to newest
+
+      if (error) throw error;
+
+      const colors = {
+        audio: 'bg-orange-50',
+        photo: 'bg-indigo-50',
+        text: 'bg-emerald-50'
+      };
+
+      const transformedArtifacts = data?.map((asset) => {
+        const year = new Date(asset.content_date).getFullYear().toString();
+        return {
+          id: asset.id,
+          year,
+          title: asset.title || 'Untitled Memory',
+          desc: asset.description || 'A precious moment captured in time.',
+          type: asset.asset_type,
+          duration: asset.asset_type === 'audio' ? '0:00' : undefined,
+          color: colors[asset.asset_type as keyof typeof colors] || 'bg-stone-50',
+          filePath: asset.file_path,
+          textContent: asset.text_content,
+          metadata: asset.metadata
+        };
+      }) || [];
+
+      setArtifacts(transformedArtifacts);
+    } catch (error) {
+      console.error('Error refreshing artifacts:', error);
+    }
   };
 
+  // Combine hardcoded and database artifacts, limit display
   const allArtifacts = [...hardcodedArtifacts, ...artifacts];
   const displayedArtifacts = allArtifacts.slice(0, displayCount);
   const hasMore = allArtifacts.length > displayCount;
 
   const loadMore = () => {
-    setDisplayCount((prev) => Math.min(prev + 3, allArtifacts.length));
+    setDisplayCount(prev => Math.min(prev + 3, allArtifacts.length));
   };
 
-  const handlePlayAudio = async (item: Artifact) => {
-    if (!item.filePath || item.type !== "audio") return;
+  // Audio player functions
+  const handlePlayAudio = async (item: any) => {
+    if (!item.filePath || item.type !== 'audio') return;
 
+    // If clicking the same audio that's playing, pause it
     if (currentPlayingId === item.id && isPlaying) {
       audioRef.current?.pause();
       setIsPlaying(false);
       return;
     }
 
+    // If clicking the same audio that's paused, resume it
     if (currentPlayingId === item.id && !isPlaying) {
       audioRef.current?.play();
       setIsPlaying(true);
       return;
     }
 
+    // Load and play new audio
     try {
       const { data } = supabase.storage
-        .from("audio_uploads")
+        .from('audio_uploads')
         .getPublicUrl(item.filePath);
 
       if (audioRef.current) {
         audioRef.current.src = data.publicUrl;
         audioRef.current.load();
-
+        
         audioRef.current.onloadedmetadata = () => {
           setAudioDuration(audioRef.current?.duration || 0);
         };
@@ -214,9 +251,7 @@ const TimelineTab = () => {
         audioRef.current.ontimeupdate = () => {
           if (audioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
-            setAudioProgress(
-              (audioRef.current.currentTime / audioRef.current.duration) * 100
-            );
+            setAudioProgress((audioRef.current.currentTime / audioRef.current.duration) * 100);
           }
         };
 
@@ -231,29 +266,37 @@ const TimelineTab = () => {
         setIsPlaying(true);
       }
     } catch (error) {
-      console.error("Error playing audio:", error);
+      console.error('Error playing audio:', error);
     }
   };
 
   const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return "0:00";
+    if (!seconds || isNaN(seconds)) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    // FIXED: Added backticks for template literal
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
+    // FIXED: Added backticks
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleButtonClick = () => fileInputRef.current?.click();
-  const handleTextButtonClick = () => textFileInputRef.current?.click();
-  const handleImageButtonClick = () => imageFileInputRef.current?.click();
+  const handleButtonClick = () => {
+    fileInputRef.current?.click();
+  };
 
-  // --- Audio Upload Handler ---
+  const handleTextButtonClick = () => {
+    textFileInputRef.current?.click();
+  };
+
+  const handleImageButtonClick = () => {
+    imageFileInputRef.current?.click();
+  };
+
   const handleAudioFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
     const allowedTypes = [
       "audio/mpeg",
       "audio/mp3",
@@ -263,9 +306,7 @@ const TimelineTab = () => {
       "audio/ogg",
       "audio/webm",
     ];
-    const hasValidExtension = file.name.match(
-      /\.(mp3|wav|m4a|aac|ogg|webm)$/i
-    );
+    const hasValidExtension = file.name.match(/\.(mp3|wav|m4a|aac|ogg|webm)$/i);
     const hasValidMimeType = allowedTypes.includes(file.type);
 
     if (!hasValidExtension && !hasValidMimeType) {
@@ -290,46 +331,50 @@ const TimelineTab = () => {
       }
       const timestamp = Date.now();
       const fileExt = file.name.split(".").pop();
-      // FIXED: Added backticks for template literal
+      // FIXED: Added backticks
       const filePath = `${user.id}/${timestamp}_${file.name}`;
 
-      const { error: uploadError } = await supabase.storage
+      // 1. Upload to storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from("audio_uploads")
-        .upload(filePath, file, { cacheControl: "3600", upsert: false });
-
-      if (uploadError) throw uploadError;
-
-      setAudioUploadMessage("Analyzing audio with AI...");
-      const aiAnalysis = await analyzeFile(file, "audio");
-      const aiResult = aiAnalysis || {
-        title: null,
-        description: null,
-        text_content: null,
-      };
-
-      const contentDate = file.lastModified
-        ? new Date(file.lastModified).toISOString()
-        : new Date().toISOString();
-
-      const { error: dbError } = await supabase
-        .from("memoir_assets")
-        .insert({
-          user_id: user.id,
-          file_path: filePath,
-          memoir_id: null,
-          asset_type: "audio",
-          content_date: contentDate,
-          title: aiResult.title,
-          description: aiResult.description,
-          text_content: aiResult.text_content,
-          metadata: {
-            original_filename: file.name,
-            duration_seconds: null,
-            format: fileExt?.toLowerCase() || null,
-            file_size: file.size,
-          },
-          is_processed: aiResult.title ? true : false,
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
         });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // 2. Analyze audio with AI (Direct Client Side)
+      setAudioUploadMessage("Analyzing audio with AI...");
+      
+      // CALLING LOCAL HELPER INSTEAD OF EDGE FUNCTION
+      const aiAnalysis = await analyzeFile(file, 'audio');
+      
+      const aiResult = aiAnalysis || { title: null, description: null, text_content: null };
+
+      // Use file modification date as content_date
+      const contentDate = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
+
+      // 3. Insert record into memoir_assets table
+      const { error: dbError } = await supabase.from("memoir_assets").insert({
+        user_id: user.id,
+        file_path: filePath,
+        memoir_id: null,
+        asset_type: 'audio',
+        content_date: contentDate,
+        title: aiResult.title,
+        description: aiResult.description,
+        text_content: aiResult.text_content, // Stores the transcription
+        metadata: {
+          original_filename: file.name,
+          duration_seconds: null,
+          format: fileExt?.toLowerCase() || null,
+          file_size: file.size
+        },
+        is_processed: aiResult.title ? true : false
+      });
 
       if (dbError) {
         await supabase.storage.from("audio_uploads").remove([filePath]);
@@ -338,7 +383,7 @@ const TimelineTab = () => {
 
       setAudioUploadStatus("success");
       setAudioUploadMessage("Audio uploaded successfully!");
-      await refreshArtifacts();
+      await refreshArtifacts(); // Refresh the timeline
       setTimeout(() => setAudioUploadStatus("idle"), 3000);
     } catch (error: any) {
       console.error("Upload error:", error);
@@ -347,17 +392,19 @@ const TimelineTab = () => {
       setTimeout(() => setAudioUploadStatus("idle"), 3000);
     } finally {
       setUploadingAudio(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
-  // --- Text Upload Handler ---
   const handleTextFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
     const allowedTypes = [
       "text/plain",
       "text/markdown",
@@ -398,49 +445,55 @@ const TimelineTab = () => {
       // FIXED: Added backticks
       const filePath = `${user.id}/${timestamp}_${file.name}`;
 
-      const { error: uploadError } = await supabase.storage
+      // 1. Upload to storage
+      const { data, error: uploadError } = await supabase.storage
         .from("text_uploads")
-        .upload(filePath, file, { cacheControl: "3600", upsert: false });
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        throw uploadError;
+      }
 
-      const extension = file.name.split(".").pop()?.toLowerCase() || "txt";
+      const extension = file.name.split('.').pop()?.toLowerCase() || 'txt';
       const docTypeMap: { [key: string]: string } = {
-        txt: "text",
-        md: "markdown",
-        markdown: "markdown",
-        csv: "csv",
+        'txt': 'text',
+        'md': 'markdown',
+        'markdown': 'markdown',
+        'csv': 'csv'
       };
-      const docType = docTypeMap[extension] || "text";
+      const docType = docTypeMap[extension] || 'text';
 
+      // 2. Analyze text with AI (Direct Client Side)
       setTextUploadMessage("Summarizing story...");
-      const aiAnalysis = await analyzeFile(file, "text");
-      const aiResult = aiAnalysis || {
-        title: null,
-        description: null,
-        text_content: null,
-      };
+      
+      // CALLING LOCAL HELPER INSTEAD OF EDGE FUNCTION
+      const aiAnalysis = await analyzeFile(file, 'text');
+      const aiResult = aiAnalysis || { title: null, description: null, text_content: null };
 
-      const contentDate = file.lastModified
-        ? new Date(file.lastModified).toISOString()
-        : new Date().toISOString();
+      const contentDate = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
 
-      const { error: dbError } = await supabase.from("memoir_assets").insert({
-        user_id: user.id,
-        file_path: filePath,
-        memoir_id: null,
-        asset_type: "text",
-        content_date: contentDate,
-        title: aiResult.title,
-        description: aiResult.description,
-        text_content: aiResult.text_content,
-        metadata: {
-          original_filename: file.name,
-          doc_type: docType,
-          file_size: file.size,
-        },
-        is_processed: aiResult.title ? true : false,
-      });
+      // 3. Insert into database
+      const { error: dbError } = await supabase
+        .from("memoir_assets")
+        .insert({
+          user_id: user.id,
+          file_path: filePath,
+          memoir_id: null,
+          asset_type: 'text',
+          content_date: contentDate,
+          title: aiResult.title,
+          description: aiResult.description,
+          text_content: aiResult.text_content,
+          metadata: {
+            original_filename: file.name,
+            doc_type: docType,
+            file_size: file.size
+          },
+          is_processed: aiResult.title ? true : false
+        });
 
       if (dbError) {
         await supabase.storage.from("text_uploads").remove([filePath]);
@@ -450,7 +503,7 @@ const TimelineTab = () => {
 
       setTextUploadStatus("success");
       setTextUploadMessage("Story uploaded successfully!");
-      await refreshArtifacts();
+      await refreshArtifacts(); // Refresh the timeline
       setTimeout(() => setTextUploadStatus("idle"), 3000);
     } catch (error: any) {
       console.error("Upload error:", error);
@@ -459,17 +512,19 @@ const TimelineTab = () => {
       setTimeout(() => setTextUploadStatus("idle"), 3000);
     } finally {
       setUploadingText(false);
-      if (textFileInputRef.current) textFileInputRef.current.value = "";
+      if (textFileInputRef.current) {
+        textFileInputRef.current.value = "";
+      }
     }
   };
 
-  // --- Image Upload Handler ---
   const handleImageChange = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Validate file type
     const allowedTypes = [
       "image/jpeg",
       "image/jpg",
@@ -516,58 +571,62 @@ const TimelineTab = () => {
       // FIXED: Added backticks
       const filePath = `${user.id}/${timestamp}_${file.name}`;
 
-      const { error: uploadError } = await supabase.storage
+      // 1. Upload to storage
+      const { data, error: uploadError } = await supabase.storage
         .from("photos_upload")
-        .upload(filePath, file, { cacheControl: "3600", upsert: false });
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        throw uploadError;
+      }
 
+      // 2. Analyze image with AI (Direct Client Side)
       setImageUploadMessage("Analyzing image context...");
-      const aiAnalysis = await analyzeFile(file, "photo");
+      
+      // CALLING LOCAL HELPER INSTEAD OF EDGE FUNCTION
+      const aiAnalysis = await analyzeFile(file, 'photo');
       const aiResult = aiAnalysis || { title: null, description: null };
 
+      // Extract EXIF metadata
       let contentDate: string;
       try {
         const exifData = await exifr.parse(file, {
-          pick: ["DateTimeOriginal", "DateTime", "CreateDate"],
+          pick: ['DateTimeOriginal', 'DateTime', 'CreateDate'],
         });
-        const exifDate =
-          exifData?.DateTimeOriginal || exifData?.DateTime || exifData?.CreateDate;
-
+        
+        const exifDate = exifData?.DateTimeOriginal || exifData?.DateTime || exifData?.CreateDate;
+        
         if (exifDate && exifDate instanceof Date) {
           contentDate = exifDate.toISOString();
         } else {
-          contentDate = file.lastModified
-            ? new Date(file.lastModified).toISOString()
-            : new Date().toISOString();
+          contentDate = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
         }
       } catch (exifError) {
-        console.log(
-          "Could not extract EXIF data, using file modification date:",
-          exifError
-        );
-        contentDate = file.lastModified
-          ? new Date(file.lastModified).toISOString()
-          : new Date().toISOString();
+        console.log('Could not extract EXIF data, using file modification date:', exifError);
+        contentDate = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
       }
 
+      // 3. Insert record into database
       const { error: dbError } = await supabase.from("memoir_assets").insert({
         user_id: user.id,
         file_path: filePath,
         memoir_id: null,
-        asset_type: "photo",
+        asset_type: 'photo',
         content_date: contentDate,
         title: aiResult.title,
         description: aiResult.description,
-        text_content: null,
+        text_content: null, 
         metadata: {
           original_filename: file.name,
           width: null,
           height: null,
           format: fileExt?.toLowerCase() || null,
-          file_size: file.size,
+          file_size: file.size
         },
-        is_processed: aiResult.title ? true : false,
+        is_processed: aiResult.title ? true : false
       });
 
       if (dbError) {
@@ -577,7 +636,7 @@ const TimelineTab = () => {
 
       setImageUploadStatus("success");
       setImageUploadMessage("Image uploaded successfully!");
-      await refreshArtifacts();
+      await refreshArtifacts(); // Refresh the timeline
       setTimeout(() => setImageUploadStatus("idle"), 3000);
     } catch (error: any) {
       console.error("Upload error:", error);
@@ -586,15 +645,18 @@ const TimelineTab = () => {
       setTimeout(() => setImageUploadStatus("idle"), 3000);
     } finally {
       setUploadingImage(false);
-      if (imageFileInputRef.current) imageFileInputRef.current.value = "";
+      if (imageFileInputRef.current) {
+        imageFileInputRef.current.value = "";
+      }
     }
   };
 
   return (
     <div className="px-5 py-6 space-y-8 relative min-h-screen bg-[#FDFBF7]">
+      {/* Hidden audio element for playback */}
       <audio ref={audioRef} className="hidden" />
-
-      {/* Hidden File Inputs */}
+      
+      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -603,6 +665,7 @@ const TimelineTab = () => {
         className="hidden"
         disabled={uploadingAudio}
       />
+
       <input
         ref={textFileInputRef}
         type="file"
@@ -611,6 +674,7 @@ const TimelineTab = () => {
         className="hidden"
         disabled={uploadingText}
       />
+
       <input
         ref={imageFileInputRef}
         type="file"
@@ -620,7 +684,7 @@ const TimelineTab = () => {
         disabled={uploadingImage}
       />
 
-      {/* Upload Status Toasts */}
+      {/* Audio Upload Status Toast */}
       {audioUploadStatus !== "idle" && (
         <div
           className={`fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] max-w-[380px] w-[calc(100%-3rem)] mx-auto px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-xl animate-fade-in-up ${
@@ -639,6 +703,8 @@ const TimelineTab = () => {
           </div>
         </div>
       )}
+
+      {/* Text Upload Status Toast */}
       {textUploadStatus !== "idle" && (
         <div
           className={`fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] max-w-[380px] w-[calc(100%-3rem)] mx-auto px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-xl animate-fade-in-up ${
@@ -657,6 +723,8 @@ const TimelineTab = () => {
           </div>
         </div>
       )}
+
+      {/* Image Upload Status Toast */}
       {imageUploadStatus !== "idle" && (
         <div
           className={`fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] max-w-[380px] w-[calc(100%-3rem)] mx-auto px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-xl animate-fade-in-up ${
@@ -676,15 +744,14 @@ const TimelineTab = () => {
         </div>
       )}
 
-      {/* --- The Essence Section --- */}
+      {/* --- NEW: The Essence Section (让后代一眼看懂他是谁) --- */}
       <div className="bg-white rounded-[24px] p-5 border border-[#EBE5DA] shadow-sm mb-8 animate-fade-in-up">
         <p className="text-[10px] font-bold text-[#D97706] uppercase tracking-widest mb-3 flex items-center gap-1">
           <Sparkles size={10} /> The Essence of Ah Kow
         </p>
 
-        {/* Action Grid */}
+        {/* 快速入口 Grid */}
         <div className="grid grid-cols-2 gap-3 mb-4">
-          {/* Voice Upload */}
           <button
             onClick={handleButtonClick}
             disabled={uploadingAudio}
@@ -718,7 +785,7 @@ const TimelineTab = () => {
             </div>
           </button>
 
-          {/* Image Upload */}
+          {/* Image Upload Button */}
           <button
             onClick={handleImageButtonClick}
             disabled={uploadingImage}
@@ -747,12 +814,12 @@ const TimelineTab = () => {
               <p className="text-[10px] text-[#8C7B68]">
                 {uploadingImage
                   ? "Please wait"
-                  : "Upload snapshots"}
+                  : "Upload snapshots of the precious moments"}
               </p>
             </div>
           </button>
 
-          {/* Text Upload */}
+          {/* Text Upload Button */}
           <button
             onClick={handleTextButtonClick}
             disabled={uploadingText}
@@ -779,13 +846,13 @@ const TimelineTab = () => {
                 {uploadingText ? "Uploading..." : "His Story"}
               </p>
               <p className="text-[10px] text-[#8C7B68]">
-                {uploadingText ? "Please wait" : "Upload biography"}
+                {uploadingText ? "Please wait" : "Upload his biography"}
               </p>
             </div>
           </button>
         </div>
 
-        {/* Traits */}
+        {/* 标签 (Traits) */}
         <div className="flex flex-wrap gap-2">
           <span className="px-3 py-1.5 rounded-xl bg-[#F5F2EB] text-[#594A3C] text-[11px] font-medium border border-[#E6DCCF]">
             Family-First
@@ -799,7 +866,7 @@ const TimelineTab = () => {
         </div>
       </div>
 
-      {/* --- Timeline Feed --- */}
+      {/* --- Timeline Starts --- */}
       <div className="relative">
         <div className="absolute left-[22px] top-4 bottom-0 w-[2px] border-l-2 border-dashed border-stone-300" />
 
@@ -835,7 +902,7 @@ const TimelineTab = () => {
                 </span>
               </div>
               <div
-                // FIXED: Added backticks and quotes
+                // FIXED: Added backticks
                 className={`rounded-3xl p-5 shadow-lg transform transition-all hover:scale-[1.02] relative overflow-hidden ${item.color}`}
               >
                 <div className="relative z-10">
@@ -845,7 +912,6 @@ const TimelineTab = () => {
                   <p className="text-xs text-[#594A3C] leading-relaxed mb-3 opacity-90">
                     {item.desc}
                   </p>
-                  {/* Audio Content */}
                   {item.type === "audio" && (
                     <div className="bg-[#3D2E22] rounded-xl p-2.5 flex items-center gap-3 shadow-md">
                       <button
@@ -860,49 +926,37 @@ const TimelineTab = () => {
                       </button>
                       <div className="flex-1">
                         <div className="h-1 bg-white/20 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-amber-400 rounded-full transition-all duration-100"
-                            style={{
-                              width: `${
-                                currentPlayingId === item.id ? audioProgress : 0
-                              }%`,
-                            }}
+                          <div 
+                            className="h-full bg-amber-400 rounded-full transition-all duration-100" 
+                            // FIXED: Added backticks
+                            style={{ width: `${currentPlayingId === item.id ? audioProgress : 0}%` }}
                           />
                         </div>
                       </div>
                       <span className="text-[9px] text-orange-200 font-mono">
                         {currentPlayingId === item.id && currentTime > 0
-                          ? `${formatTime(currentTime)} / ${formatTime(
-                              audioDuration
-                            )}`
+                          // FIXED: Added backticks
+                          ? `${formatTime(currentTime)} / ${formatTime(audioDuration)}`
                           : item.duration || "0:00"}
                       </span>
                     </div>
                   )}
-                  {/* Photo Content */}
                   {item.type === "photo" && item.filePath && (
                     <div className="mt-3 rounded-xl overflow-hidden shadow-md">
-                      <img
-                        // FIXED: Added backticks for storage URL
-                        src={`${
-                          supabase.storage
-                            .from("photos_upload")
-                            .getPublicUrl(item.filePath).data.publicUrl
-                        }`}
+                      <img 
+                        // FIXED: Added backticks
+                        src={`${supabase.storage.from('photos_upload').getPublicUrl(item.filePath).data.publicUrl}`}
                         alt={item.title}
                         className="w-full h-48 object-cover"
                         onError={(e) => {
-                          e.currentTarget.style.display = "none";
+                          e.currentTarget.style.display = 'none';
                         }}
                       />
                     </div>
                   )}
-                  {/* Text Content */}
                   {item.type === "text" && item.textContent && (
                     <div className="mt-3 bg-white/50 rounded-xl p-3 text-xs text-[#594A3C] leading-relaxed max-h-32 overflow-hidden relative">
-                      <p className="line-clamp-4">
-                        {item.textContent.substring(0, 200)}...
-                      </p>
+                      <p className="line-clamp-4">{item.textContent.substring(0, 200)}...</p>
                       <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white/50 to-transparent" />
                     </div>
                   )}
@@ -915,11 +969,11 @@ const TimelineTab = () => {
 
       {hasMore && (
         <div className="text-center pt-4 pb-20">
-          <button
+          <button 
             onClick={loadMore}
             className="text-xs font-bold text-amber-600 border-b border-amber-600/30 hover:text-amber-800 transition-colors"
           >
-            Load more memories...
+            Load earlier memories...
           </button>
         </div>
       )}
@@ -927,263 +981,54 @@ const TimelineTab = () => {
   );
 };
 
-// ------------------- 2. Echo (The Living Memory) -------------------
+// ------------------- 2. Echo (Contextual Reminiscence) -------------------
 const EchoTab = () => {
-  // State definitions
-  const [status, setStatus] = useState("Idle");
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [userTranscript, setUserTranscript] = useState("");
-  const [aiText, setAiText] = useState("I am listening...");
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-
-  // 1. Init: Load voices
-  useEffect(() => {
-    const loadVoices = () => {
-      const available = window.speechSynthesis.getVoices();
-      if (available.length > 0) {
-        setVoices(available);
-        console.log("Voices loaded:", available.length);
-      }
-    };
-
-    loadVoices();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-  }, []);
-
-  // 2. Logic: Keyword matching
-  const processResponse = (text: string) => {
-    const lowerText = text.toLowerCase();
-    let response = "";
-
-    console.log("Processing keywords:", lowerText);
-
-    if (
-      lowerText.includes("miss") ||
-      lowerText.includes("mess") ||
-      lowerText.includes("love") ||
-      lowerText.includes("long")
-    ) {
-      response = "I know. I miss you too. But remember, I never really left.";
-    } else if (
-      lowerText.includes("hello") ||
-      lowerText.includes("hi") ||
-      lowerText.includes("hey")
-    ) {
-      response = "Hello. It is so good to hear your voice again.";
-    } else if (
-      lowerText.includes("remember") ||
-      lowerText.includes("memory") ||
-      lowerText.includes("past")
-    ) {
-      response = "I remember everything. Especially the sound of your laughter.";
-    } else if (lowerText.includes("bye") || lowerText.includes("see you")) {
-      response = "Goodbye for now. I will be right here.";
-    } else if (
-      lowerText.includes("weather") ||
-      lowerText.includes("rain") ||
-      lowerText.includes("hot")
-    ) {
-      response =
-        "Do not worry about the weather. Focus on the warmth in your heart.";
-    } else {
-      response = "I am listening. Tell me more about your day.";
-    }
-
-    setAiText(response);
-    speak(response);
-  };
-
-  // 3. TTS
-  const speak = (text: string) => {
-    if (!window.speechSynthesis) {
-      alert("Your browser does not support speech synthesis");
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    setStatus("Speaking...");
-
-    const utterance = new SpeechSynthesisUtterance(text);
-
-    const preferredVoice =
-      voices.find((v) => v.name.includes("Google US English")) ||
-      voices.find((v) => v.name.includes("David")) ||
-      voices.find((v) => v.lang.includes("en") && v.name.includes("Male")) ||
-      voices.find((v) => v.lang.includes("en")) ||
-      voices[0];
-
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-      console.log("Using voice:", preferredVoice.name);
-    }
-
-    utterance.rate = 0.85;
-    utterance.pitch = 0.9;
-    utterance.volume = 1.0;
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      setStatus("Idle");
-    };
-
-    utterance.onerror = (e) => {
-      console.error("TTS Error:", e);
-      setStatus("TTS Error");
-    };
-
-    window.speechSynthesis.speak(utterance);
-  };
-
-  // 4. STT
-  const startListening = () => {
-    // @ts-ignore
-    const SpeechRecognition =
-      // @ts-ignore
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert("This feature only supports Chrome Desktop or Android Chrome.");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setStatus("Listening...");
-      setUserTranscript("");
-      window.speechSynthesis.cancel();
-    };
-
-    recognition.onresult = (event: any) => {
-      const last = event.results.length - 1;
-      const text = event.results[last][0].transcript;
-
-      console.log("Recognition result:", text);
-      setUserTranscript(text);
-
-      setStatus("Thinking...");
-      setTimeout(() => {
-        processResponse(text);
-      }, 600);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("Recognition error:", event.error);
-      setStatus("Microphone Error: " + event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      if (!window.speechSynthesis.speaking) setStatus("Idle");
-    };
-
-    try {
-      recognition.start();
-    } catch (e) {
-      console.error("Cannot start recording:", e);
-      setStatus("Mic Busy? Try again.");
-    }
-  };
-
   return (
-    <div className="h-[calc(100vh-200px)] relative overflow-hidden bg-black transition-all duration-1000">
-      <div
-        className={`absolute inset-0 transition-all duration-[2000ms] ease-in-out ${
-          isSpeaking ? "scale-110 opacity-100" : "scale-100 opacity-60"
-        }`}
-      >
+    <div className="h-[calc(100vh-200px)] relative overflow-hidden bg-black">
+      <div className="absolute inset-0">
         <img
           src="https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=1260"
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover opacity-80"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-black/40" />
       </div>
-
-      <div className="absolute inset-0 flex flex-col justify-end p-8 z-20 pb-20">
-        {/* User Transcript Debug */}
-        <div className="mb-6 text-center min-h-[24px]">
-          {userTranscript && (
-            <span className="text-white/80 text-sm font-medium animate-fade-in-up bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 shadow-lg">
-              You said: "{userTranscript}"
+      <div className="absolute inset-0 flex flex-col justify-between p-6 z-20">
+        <div className="flex justify-between items-start text-white/90">
+          <div>
+            <span className="font-serif text-2xl font-bold tracking-tight text-white">
+              Grandpa Lim
             </span>
-          )}
-        </div>
-
-        {/* AI Response Subtitles */}
-        <div
-          className={`transition-all duration-1000 transform mb-8 ${
-            isSpeaking ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
-          }`}
-        >
-          <p className="text-amber-100 text-2xl font-serif font-medium leading-relaxed text-center drop-shadow-2xl px-4">
-            "{aiText}"
-          </p>
-        </div>
-
-        {/* Listening Animation */}
-        {isListening && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-4 pointer-events-none">
-            <div className="flex gap-1.5 h-10 items-center">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div
-                  key={i}
-                  className="w-1.5 bg-amber-400 rounded-full animate-bounce"
-                  // FIXED: Added backticks
-                  style={{
-                    height: `${Math.random() * 30 + 10}px`,
-                    animationDelay: `${i * 0.1}s`,
-                  }}
-                />
-              ))}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+              <span className="text-xs font-medium">Memory Active</span>
             </div>
-            <p className="text-amber-400 font-bold tracking-widest text-xs uppercase shadow-black drop-shadow-md">
-              Listening...
+          </div>
+          <div className="bg-white/10 backdrop-blur-md rounded-full p-2">
+            <Video size={20} className="text-white" />
+          </div>
+        </div>
+        <div className="space-y-6">
+          <div className="bg-black/60 backdrop-blur-xl rounded-3xl p-6 border border-white/10 shadow-2xl">
+            <p className="text-white text-lg font-serif font-medium leading-relaxed">
+              "It's raining heavily today...{" "}
+              <span className="text-amber-300">
+                Reminds me of that afternoon we got stuck at Changi Beach.
+              </span>{" "}
+              We shared that one umbrella, remember? I hope you're staying dry."
             </p>
           </div>
-        )}
-
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-8 mt-2">
-          <button className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white/40 border border-white/10 hover:bg-white/20 transition-all">
-            <Volume2 size={20} />
-          </button>
-
-          <button
-            onClick={startListening}
-            disabled={isSpeaking || isListening}
-            className={`w-20 h-20 rounded-full flex items-center justify-center text-white shadow-2xl transition-all duration-300 transform hover:scale-105 active:scale-95 border-4 ${
-              isListening
-                ? "bg-red-500 border-red-400 ring-4 ring-red-500/20"
-                : isSpeaking
-                ? "bg-amber-600 border-amber-500 ring-4 ring-amber-600/20 opacity-90 cursor-default"
-                : "bg-emerald-500 border-emerald-400 ring-4 ring-emerald-500/20 animate-pulse-slow cursor-pointer"
-            }`}
-          >
-            {isListening ? (
-              <Video size={32} className="animate-pulse" />
-            ) : (
-              <Mic size={32} />
-            )}
-          </button>
-
-          <button className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white/40 border border-white/10 hover:bg-white/20 transition-all">
-            <MessageCircle size={20} />
-          </button>
+          <div className="flex items-center justify-center gap-8 pb-6">
+            <button className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white">
+              <Volume2 size={24} />
+            </button>
+            <button className="w-20 h-20 rounded-full bg-red-500 flex items-center justify-center text-white shadow-xl hover:scale-105 transition">
+              <Phone size={36} className="rotate-[135deg]" />
+            </button>
+            <button className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center shadow-lg">
+              <Mic size={24} />
+            </button>
+          </div>
         </div>
-
-        {/* Debug Status */}
-        <p className="text-center text-[10px] text-white/30 mt-6 uppercase tracking-widest font-mono">
-          System Status: {status}
-        </p>
       </div>
     </div>
   );
@@ -1253,7 +1098,7 @@ const VaultTab = () => {
             }`}
           >
             <div
-              // FIXED: Added backticks for template literal
+              // FIXED: Added backticks
               className={`h-full rounded-xl p-5 flex items-center gap-4 ${letter.bg} relative overflow-hidden`}
             >
               <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-white to-transparent" />
@@ -1311,11 +1156,9 @@ const VaultTab = () => {
   );
 };
 
-// ------------------- 4. Letters (Healing Words) -------------------
+// ------------------- 4. Letters (Healing Words - 替代 Garden) -------------------
 const LettersTab = () => {
-  const [mode, setMode] = useState<"list" | "write-him" | "write-self">(
-    "list"
-  );
+  const [mode, setMode] = useState<"list" | "write-him" | "write-self">("list");
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
 
@@ -1488,6 +1331,7 @@ export default function Capsule() {
     <div
       className={`min-h-screen flex justify-center ${getBgColor()} transition-colors duration-700`}
     >
+      {/* 布局修复：限制宽度，防止横向拉伸 */}
       <div
         // FIXED: Added backticks
         className={`w-full max-w-[430px] min-h-screen relative flex flex-col shadow-2xl transition-colors duration-700 ${getBgColor()}`}
@@ -1637,6 +1481,7 @@ export default function Capsule() {
             </div>
           </div>
         ) : (
+          /* Spacer */
           <div className="h-[150px] shrink-0" />
         )}
 
